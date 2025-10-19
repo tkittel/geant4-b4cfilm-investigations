@@ -20,6 +20,22 @@ piecewise_pts = [ (0.0,0.984),
                   (4.22,0),
                  ]
 
+def import_file_as_module( path, modname ):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(modname, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+_irf_cache=[None]
+def import_recipe_function():
+    if _irf_cache[0] is None:
+        f = pathlib.Path(__file__).parent.parent.joinpath('recipes','b10film.py')
+        assert f.is_file()
+        m = import_file_as_module(f,'b10film')
+        _irf_cache[0] = np.vectorize( m.b10film_ion_escape_probability )
+    return _irf_cache[0]
+
 def calc_piecewise_thr_a_b():
     o = []
     for i in range(len(piecewise_pts)-1):
@@ -28,28 +44,28 @@ def calc_piecewise_thr_a_b():
         o.append( ( x1, y0-(y1-y0)*x0/(x1-x0), (y1-y0)/(x1-x0) ) )
     return o
 
-def autogen_b10film_ion_escape_probability( x ):
-    if x < 1.01:
-        return 0.984 - 0.6135644 * x
-    if x < 2.5:
-        if x < 1.1:
-            return 0.7873778 - 0.4188889 * x
-        if x < 1.3:
-            return 0.6159 - 0.263 * x
-        return 0.4934833 - 0.1688333 * x
-    if x > 4.2199578:
-        return 0.0
-    if x < 2.7:
-        return 0.40265 - 0.1325 * x
-    if x < 2.9:
-        return 0.30005 - 0.0945 * x
-    if x < 3.1:
-        return 0.2 - 0.06 * x
-    if x < 3.435:
-        return 0.1237493 - 0.03540299 * x
-    if x < 3.85:
-        return 0.01488675 - 0.003710843 * x
-    return 0.006843243 - 0.001621622 * x
+#def autogen_b10film_ion_escape_probability( x ):
+#    if x < 1.01:
+#        return 0.984 - 0.6135644 * x
+#    if x < 2.5:
+#        if x < 1.1:
+#            return 0.7873778 - 0.4188889 * x
+#        if x < 1.3:
+#            return 0.6159 - 0.263 * x
+#        return 0.4934833 - 0.1688333 * x
+#    if x > 4.2199578:
+#        return 0.0
+#    if x < 2.7:
+#        return 0.40265 - 0.1325 * x
+#    if x < 2.9:
+#        return 0.30005 - 0.0945 * x
+#    if x < 3.1:
+#        return 0.2 - 0.06 * x
+#    if x < 3.435:
+#        return 0.1237493 - 0.03540299 * x
+#    if x < 3.85:
+#        return 0.01488675 - 0.003710843 * x
+#    return 0.006843243 - 0.001621622 * x
 
 def print_fct():
     thr_a_b = calc_piecewise_thr_a_b()
@@ -409,21 +425,21 @@ def do_fit(data, data_only):
     plt.xlim(h.xmin,h.xmax)
 
 
-    from numpy import polynomial
-    fitdomain=[1.0,4.2]
-    fitmask = (h.bincenters<=fitdomain[1])
+    #from numpy import polynomial
+    #fitdomain=[1.0,4.2]
+    #fitmask = (h.bincenters<=fitdomain[1])
 
-#    legfit = polynomial.legendre.Legendre.fit( h.bincenters[fitmask],
-#                                               y[fitmask],
-#                                               w = y[fitmask]**2/yerr[fitmask]**4,
-#                                               deg=10,
-#                                               domain=fitdomain )
-#    x = _np_linspace(fitdomain[0],fitdomain[1],20000)
-#    print(legfit(x))
-    #plt.plot(x,legfit(x),label='polyfit',color='red',lw=4,ls=':',zorder=999)
-    #plt.plot([0.0,fitdomain[0]],
-    #         [ y[0], legfit(fitdomain[0]) ],
-    #         label='linfit',color='orange',lw=4,ls=':',zorder=999)
+    #    legfit = polynomial.legendre.Legendre.fit( h.bincenters[fitmask],
+    #                                               y[fitmask],
+    #                                               w = y[fitmask]**2/yerr[fitmask]**4,
+    #                                               deg=10,
+    #                                               domain=fitdomain )
+    #    x = _np_linspace(fitdomain[0],fitdomain[1],20000)
+    #    print(legfit(x))
+        #plt.plot(x,legfit(x),label='polyfit',color='red',lw=4,ls=':',zorder=999)
+        #plt.plot([0.0,fitdomain[0]],
+        #         [ y[0], legfit(fitdomain[0]) ],
+        #         label='linfit',color='orange',lw=4,ls=':',zorder=999)
 
     #y[0]
     assert piecewise_pts[0][0]==0.0
@@ -450,9 +466,11 @@ def do_fit(data, data_only):
                   ls='none',
                  zorder=999999 )
 
+        recipefct = import_recipe_function()
         plt.plot( xs,
-                  np.vectorize(autogen_b10film_ion_escape_probability)(xs),
-                  label='autogenfct',color='orange',lw=3,ls='--',zorder=999995)
+                  recipefct(xs),
+                  label='autogenfct',color='orange',lw=3,ls='--',
+                  zorder=999995)
 
 
 #    plt.plot([0.0,1.1,2.7,3.5],
@@ -486,18 +504,18 @@ def main():
     infile = infile[0]
 
     data = json.loads(pathlib.Path(infile).read_text())
-    if not 'nodump' in args:
+    if 'nodump' not in args:
         import pprint
         pprint.pprint(data)
-    if not 'nohists' in args:
+    if 'nohists' not in args:
         show_hists(data)
-    if not 'nofit' in args:
+    if 'nofit' not in args:
         do_fit( data,
                 data_only = ('fitinputonly' in args ) )
-    if not 'noprintfct' in args:
+    if 'noprintfct' not in args:
         print_fct()
 
-    if not 'noprintcfg' in args:
+    if 'noprintcfg' not in args:
         import pprint
         print()
         pprint.pprint(data['cfg'])
