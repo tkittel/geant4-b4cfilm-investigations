@@ -1,0 +1,17 @@
+name: film
+channels:
+  - nodefaults
+  - conda-forge
+dependencies:
+  - python
+  - compilers
+  - ncrystal >= 4.2.8
+  - matplotlib
+  - numpy
+  - zlib
+  - geant4>=11.3.2
+  - expat
+  - ruff
+  - pip
+  - pip:
+    - ncrystal-geant4 >= 0.1.0
