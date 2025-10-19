@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+import pathlib
+import subprocess
+import sys
+
+thisfile = pathlib.Path(__file__)
+reporoot = thisfile.parent.parent
+cachedir = reporoot.joinpath('build_cache')
+blddir = cachedir.joinpath('bld')
+instdir = cachedir.joinpath('inst')
+srcdir = reporoot.joinpath('src')
+cppsrcfiles = list( srcdir.rglob('*.cc') ) + list( srcdir.rglob('*.hh') )
+cfgsrcfiles = [ srcdir.joinpath('CMakeLists.txt'), thisfile ]
+compiled_app = instdir.joinpath('bin','filmsim')
+
+def invoke_cmake_cfg():
+    #Only bother with configs from scratch:
+    import shutil
+    if cachedir.exists():
+        shutil.rmtree(cachedir)
+    cachedir.mkdir()
+    subprocess.run( ['cmake',
+                     '-B',blddir,
+                     '-S',srcdir,
+                     '-DCMAKE_INSTALL_PREFIX=%s'%instdir,
+                     ],
+                    check = True,
+                    cwd = cachedir)
+
+def invoke_cmake_bldinstall():
+    cachedir.mkdir(exist_ok=True)
+    for flag in ['--build','--install']:
+        subprocess.run( ['cmake',flag,blddir],
+                        check = True,
+                        cwd = cachedir)
+
+def mtime(path):
+    if not path.exists():
+        return -float('inf')
+    return path.stat().st_mtime
+
+def main(argv):
+    do_force = False
+    while '--force' in argv:
+        argv.remove('--force')
+        do_force = True
+    if not blddir.is_dir():
+        do_force = True
+    if do_force or max( mtime(p) for p in cfgsrcfiles ) > mtime(blddir.joinpath('CMakeCache.txt')):
+        invoke_cmake_cfg()
+    if do_force or max( mtime(p) for p in cppsrcfiles ) > mtime(compiled_app):
+        invoke_cmake_bldinstall()
+    subprocess.run( [ compiled_app ] + argv[1:],
+                    check = True )
+
+if __name__=='__main__':
+    main(sys.argv[:])

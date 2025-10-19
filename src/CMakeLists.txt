@@ -33,13 +33,13 @@ if( NOT DEFINED NCrystalGeant4_DIR )
 endif()
 find_package( NCrystalGeant4 0.1.0 REQUIRED )
 
-add_executable( g4filmlib "main.cc" )
-target_compile_features( g4filmlib PRIVATE cxx_std_17 )
+add_executable( filmsim "film.cc" )
+target_compile_features( filmsim PRIVATE cxx_std_17 )
 
 target_link_libraries(
-  g4filmlib
+  filmsim
   NCrystalGeant4::NCrystalGeant4
   ${Geant4_LIBRARIES}
 )
 
-install(TARGETS "g4filmlib" DESTINATION bin )
+install(TARGETS "filmsim" DESTINATION bin )

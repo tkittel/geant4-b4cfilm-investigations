@@ -1,3 +1,24 @@
+_site
+.DS_Store
+
+*.egg-info/
+dist/
+build/
+__pycache__/
+
+/build_cache/
+
+.ruff_cache/
+
+# Emacs:
+*~
+\#*\#
+.\#*
+
+/leftovers/
+
+
+
 # Prerequisites
 *.d
 
