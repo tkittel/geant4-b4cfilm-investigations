@@ -1,0 +1,507 @@
+#!/usr/bin/env python3
+
+import json
+import pathlib
+import sys
+import numpy as np
+import numpy as _np
+from NCrystal._numpy import _np_linspace
+
+piecewise_pts = [ (0.0,0.984),
+                  (1.01, 0.3643),
+                  (1.1,0.3266),
+                  (1.3, 0.274),
+                  (2.5, 0.0714),
+                  (2.7,0.0449),
+                  (2.9,0.026),
+                  (3.1,0.014),
+                  (3.435,0.00214),
+                  (3.85,0.0006),
+                  (4.22,0),
+                 ]
+
+def calc_piecewise_thr_a_b():
+    o = []
+    for i in range(len(piecewise_pts)-1):
+        x0,y0 = piecewise_pts[i]
+        x1,y1 = piecewise_pts[i+1]
+        o.append( ( x1, y0-(y1-y0)*x0/(x1-x0), (y1-y0)/(x1-x0) ) )
+    return o
+
+def autogen_b10film_ion_escape_probability( x ):
+    if x < 1.01:
+        return 0.984 - 0.6135644 * x
+    if x < 2.5:
+        if x < 1.1:
+            return 0.7873778 - 0.4188889 * x
+        if x < 1.3:
+            return 0.6159 - 0.263 * x
+        return 0.4934833 - 0.1688333 * x
+    if x > 4.2199578:
+        return 0.0
+    if x < 2.7:
+        return 0.40265 - 0.1325 * x
+    if x < 2.9:
+        return 0.30005 - 0.0945 * x
+    if x < 3.1:
+        return 0.2 - 0.06 * x
+    if x < 3.435:
+        return 0.1237493 - 0.03540299 * x
+    if x < 3.85:
+        return 0.01488675 - 0.003710843 * x
+    return 0.006843243 - 0.001621622 * x
+
+def print_fct():
+    thr_a_b = calc_piecewise_thr_a_b()
+    thrvals = [thr for thr,a,b in thr_a_b]
+    #avals = [a for thr,a,b in thr_a_b]
+    #bvals = [b for thr,a,b in thr_a_b]
+    def expr(i):
+        _,a,b = thr_a_b[i]
+        assert a>0 and b<0
+        return '%.7g - %.7g * x'%(a,abs(b))
+    print(thr_a_b)
+    print()
+    print('def autogen_b10film_ion_escape_probability( x ):')
+    print('    if x < %.14g:'%thrvals[0])
+    print('        return %s'%expr(0))
+
+
+
+    #assert thr_a_b[2] == 1.3
+    assert thr_a_b[3][0] == 2.5
+    print('    if x < 2.5:')
+    print('        if x < %.14g:'%thrvals[1])
+    print('            return %s'%expr(1))
+    print('        if x < %.14g:'%thrvals[2])
+    print('            return %s'%expr(2))
+    print('        return %s'%expr(3))
+    print('    if x > %.8g:'%((1.0-1e-5)*piecewise_pts[-1][0]))
+    print('        return 0.0')
+    for i in range(4,len(thrvals)-1):
+        print('    if x < %.14g:'%thrvals[i])
+        print('        return %s'%expr(i))
+    print('    return %s'%expr(len(thrvals)-1))
+
+
+class Hist1D:
+
+    #Copied from NCrystal _mmc.py for now (also APACHE 2.0 license).
+
+    def __init__( self, data ):
+        if data=='_no_init_':
+            return
+        self.__stats = data.get('stats')
+        self.__title = data['title']
+        hb = data['bindata']
+        self.__xmin = hb['xmin']
+        self.__xmax = hb['xmax']
+        self.__nbins = hb['nbins']
+        self.__y = _np.asarray(hb['content'],dtype=float)
+        esq = hb.get('errorsq')
+        self.__yerrsq = ( _np.asarray(esq,dtype=float)
+                          if esq is not None
+                          else None )
+        self.__yerr = None
+        assert self.__nbins == len(self.__y)
+        assert self.__yerrsq is None or self.__nbins == len(self.__yerrsq)
+
+    def clone( self, rebin_factor = 1 ):
+        c = Hist1D('_no_init_')
+        c.__stats = self.__stats
+        c.__title = self.__title
+        c.__xmin = self.__xmin
+        c.__xmax = self.__xmax
+        c.__nbins = self.__nbins
+        c.__y = self.__y.copy()
+        c.__yerrsq = self.__yerrsq.copy() if self.__yerrsq is not None else None
+        c.__yerr = self.__yerr.copy() if self.__yerr is not None else None
+        if rebin_factor > 1:
+            c.rebin( rebin_factor )
+        return c
+
+    def integrate( self, xlow, xhigh, tolerance = 1e-5 ):
+        """
+        Returns integrated contents of the histogram over the area
+        [xlow,xhigh] along with the error of that value in a tuple
+        (content,error).
+
+        This is done translating xlow and xhigh to exact bin edges and then
+        calling integrate_bins. If that is not possible within the
+        tolerance, an exception is raised.
+
+        """
+        if not ( xhigh >= xlow ):
+            from .exceptions import NCBadInput
+            raise NCBadInput('Invalid integration range requested.')
+
+        bw = self.binwidth
+        def _findedge(x):
+            if x <= self.__xmin:
+                return 0
+            if x >= self.__xmax:
+                return self.nbins
+            r = ( x - self.__xmin ) / bw
+            ir = int(r+0.5)
+            if abs(r-ir) > tolerance:
+                from .exceptions import NCBadInput
+                raise NCBadInput(f'Value {x} does not correspond exactly'
+                                 ' to a bin edge within the tolerance.')
+            return ir
+        e_low = _findedge(xlow)
+        e_high = _findedge(xhigh)
+        if e_low == e_high:
+            return ( 0.0, 0.0 )
+        assert e_low >= 0
+        assert e_low < e_high < self.nbins
+        return self.integrate_bins( e_low, e_high - 1 )
+
+    def integrate_bins( self, bin_low = None, bin_up = None ):
+        """
+        Returns integrated contents of the bins [bin_low,bin_up[ along with
+        the error of that value in a tuple (content,error).
+
+        If bin_low is None the integration will start at the first bin and
+        include the underflow bin.
+
+        If bin_up is None the integration will end at the last bin and
+        include the overflow bin.
+        """
+
+        add_overflow, add_underflow = False, False
+        if bin_low is None:
+            add_underflow = True
+            bin_low = 0
+            underflow_c = self.stats.get('underflow')
+            underflow_e2 = self.stats.get('underflow_errorsq')
+            if bool(underflow_c is None) != bool(underflow_e2 is None):
+                from .exceptions import NCBadInput
+                raise NCBadInput('Inconsistent underflow info')
+            if underflow_c is None:
+                add_underflow = False
+
+        if bin_up is None:
+            add_overflow = True
+            bin_up = self.__nbins
+            overflow_c = self.stats.get('overflow')
+            overflow_e2 = self.stats.get('overflow_errorsq')
+            if bool(overflow_c is None) != bool(overflow_e2 is None):
+                from .exceptions import NCBadInput
+                raise NCBadInput('Inconsistent overflow info')
+            if overflow_c is None:
+                add_overflow = False
+
+        bin_low, bin_up = int(bin_low), int(bin_up)
+        if bin_up < bin_low or bin_low<0 or bin_up > self.__nbins:
+            from .exceptions import NCBadInput
+            raise NCBadInput('Invalid bin range requested')
+        content_integral = self.__y[bin_low:bin_up].sum()
+        if add_underflow:
+            content_integral += underflow_c
+        if add_overflow:
+            content_integral += overflow_c
+        if self.__yerrsq is None:
+            #unweighted, just base erros on contents:
+            return ( content_integral, _np.sqrt(content_integral) )
+        errorsq_integral = self.__yerrsq[bin_low:bin_up].sum()
+        if add_underflow:
+            errorsq_integral += underflow_e2
+        if add_overflow:
+            errorsq_integral += overflow_e2
+        return ( content_integral, _np.sqrt(errorsq_integral) )
+
+    def add_contents( self, other_hist ):
+        o = other_hist
+        assert self.__xmin == o.__xmin
+        assert self.__xmax == o.__xmax
+        assert self.__nbins == o.__nbins
+        self.__stats = {}
+        self.__title = '<edited>'
+        self.__y += o.__y
+        self.__yerr = None
+        if self.__yerrsq is None:
+            if o.__yerrsq is None:
+                pass#done
+            else:
+                self.__yerrsq = self.__y + o.__yerrsq
+        else:
+            if o.__yerrsq is None:
+                self.__yerrsq += o.__y
+            else:
+                self.__yerrsq += o.__yerrsq
+
+    def rebin( self, rebin_factor ):
+        assert self.__nbins % rebin_factor == 0
+        def _dorebin(x):
+            return _np.sum( x.reshape( len(x)//rebin_factor, rebin_factor ),
+                                       axis=1)
+        self.__y = _dorebin(self.__y)
+        self.__yerr = None
+        if self.__yerrsq is not None:
+            self.__yerrsq = _dorebin(self.__yerrsq)
+        self.__nbins = self.__nbins // rebin_factor
+        assert self.__yerrsq is None or len(self.__yerrsq)==len(self.__y)
+        assert self.__nbins==len(self.__y)
+
+    @property
+    def stats( self ):
+        return self.__stats or {}
+
+    @property
+    def errors( self ):
+        if self.__yerr is None:
+            self.__yerr = _np.sqrt( self.errors_squared )
+        return self.__yerr
+
+    @property
+    def errors_squared( self ):
+        return ( self.__yerrsq
+                 if self.__yerrsq is not None
+                 else self.__y )
+
+    @property
+    def content( self ):
+        return self.__y
+
+    @property
+    def title( self ):
+        return self.__title
+
+    @property
+    def xmin( self ):
+        return self.__xmin
+
+    @property
+    def xmax( self ):
+        return self.__xmax
+
+    @property
+    def binwidth( self ):
+        return (self.__xmax-self.__xmin)/self.__nbins
+
+    @property
+    def nbins( self ):
+        return self.__nbins
+
+    @property
+    def bincenters( self ):
+        halfbw = 0.5*self.binwidth
+        return _np_linspace(self.__xmin+halfbw,
+                            self.__xmax-halfbw,
+                            self.__nbins)
+
+    @property
+    def binedges( self ):
+        return _np_linspace(self.__xmin,
+                            self.__xmax,
+                            self.__nbins+1)
+
+
+    def _hist_curve( self, error_offset = 0.0 ):
+        be = self.binedges
+        y = self.content
+        if error_offset:
+            y += self.errors * error_offset
+        cx = _np.empty(self.__nbins*2)
+        cy = _np.empty(self.__nbins*2)
+        i = 0
+        for ibin in range(self.__nbins):
+            cx[i] = be[ibin]
+            cy[i] = y[ibin]
+            i+=1
+            cx[i] = be[ibin+1]
+            cy[i] = y[ibin]
+            i+=1
+        return cx,cy
+
+    def errorbar_args( self, style = True, **kwargs ):
+        d = {'x':self.bincenters,
+             'y':self.content,'xerr':0.5*self.binwidth,
+             'yerr':self.errors }
+        if style:
+            d.update({'fmt':'.',#dont connect with line
+                      'mec':'black','mfc':'black',
+                      #'ms':4,'mew':1,
+                      'ecolor':'black','elinewidth':1.0 })
+        d.update(kwargs)
+        return d
+
+    def bar_args( self, style = True, **kwargs ):
+        d = {'x' : self.binedges[:-1],
+             'height': self.content,
+             'width': self.binwidth,
+             'align':'edge'
+             }
+        d.update(kwargs)
+        return d
+
+    def plot_hist( self, plt=None, axis=None, style=True, label=None,
+                   show_errors=True, do_show = True, set_xlim = True ):
+        if not plt and not axis:
+            #from .plot import _import_matplotlib_plt
+            #plt = _import_matplotlib_plt()
+            import matplotlib.pyplot as plt
+        if not axis:
+            axis = plt.gca()
+        axis.bar(**self.bar_args(label=label))
+        if show_errors:
+            ( error_markers,
+              ecaplines,
+              ebarlinecols ) = axis.errorbar(**self.errorbar_args())
+
+        xmin,xmax,binwidth = self.xmin, self.xmax, self.binwidth
+        if set_xlim:
+            axis.set_xlim(xmin-1e-6*binwidth,xmax+1e-6*binwidth)
+        if do_show and plt:
+            plt.show()
+
+#from NCrystal._mmc import Hist1D
+
+def show_hists(data):
+    import matplotlib.pyplot as plt
+
+    if 'simoutput' in data:
+        data = data['simoutput']
+    h1 = Hist1D(data['hists']['gasedep'])
+    h1.plot_hist(plt=plt,do_show=False)
+    plt.semilogy()
+    plt.show()
+
+    h2 = Hist1D(data['hists']['absptdist'])
+    h2.plot_hist(plt=plt,do_show=False)
+    plt.show()
+
+    h3 = Hist1D(data['hists']['absptdist_detected'])
+    h3.plot_hist(plt=plt,do_show=False)
+    plt.show()
+
+    h2.plot_hist(plt=plt,do_show=False,label='all')
+    h3.plot_hist(plt=plt,do_show=False,label='Edep_gas > 120keV')
+    plt.show()
+
+def do_fit(data, data_only):
+    import matplotlib.pyplot as plt
+
+    if 'simoutput' in data:
+        data = data['simoutput']
+
+    h = Hist1D(data['hists']['absptdist'])
+    hd = Hist1D(data['hists']['absptdist_detected'])
+    c,e = h.content,h.errors
+    cd,ed = hd.content,hd.errors
+
+    y = cd / c
+    yerr =  (e/c + ed/cd)*(cd / c)
+
+    assert h.binwidth == hd.binwidth
+    assert h.xmin == hd.xmin
+    assert h.xmax == hd.xmax
+    assert h.nbins == hd.nbins
+    bar_args = h.bar_args()
+    bar_args['height'] = y
+    ebar_args = h.errorbar_args()
+    ebar_args['y'] = y
+    ebar_args['yerr'] = yerr
+
+    plt.bar( **bar_args,label='Geant4 11.3.2 simulation data' )
+    plt.errorbar( **ebar_args )
+    #plt.xlim(h.xmin-1e-6*h.binwidth,h.xmax+1e-6*h.binwidth)
+    plt.xlim(h.xmin,h.xmax)
+
+
+    from numpy import polynomial
+    fitdomain=[1.0,4.2]
+    fitmask = (h.bincenters<=fitdomain[1])
+
+#    legfit = polynomial.legendre.Legendre.fit( h.bincenters[fitmask],
+#                                               y[fitmask],
+#                                               w = y[fitmask]**2/yerr[fitmask]**4,
+#                                               deg=10,
+#                                               domain=fitdomain )
+#    x = _np_linspace(fitdomain[0],fitdomain[1],20000)
+#    print(legfit(x))
+    #plt.plot(x,legfit(x),label='polyfit',color='red',lw=4,ls=':',zorder=999)
+    #plt.plot([0.0,fitdomain[0]],
+    #         [ y[0], legfit(fitdomain[0]) ],
+    #         label='linfit',color='orange',lw=4,ls=':',zorder=999)
+
+    #y[0]
+    assert piecewise_pts[0][0]==0.0
+    assert piecewise_pts[-1][1]==0.0
+    thr_a_b = calc_piecewise_thr_a_b()
+
+    @np.vectorize
+    def simple_param( x ):
+        for thr, a, b in thr_a_b:
+            if x < thr:
+                return a + b*x
+        return 0.0
+
+    xs = _np_linspace(0.0,5.0,200000)
+
+    if not data_only:
+        #plt.plot( xs, simple_param(xs),
+        #          label='simple',color='orange',lw=4,ls=':',zorder=99999)
+        plt.plot( [ x for x,y in piecewise_pts ],
+                  [ y for x,y in piecewise_pts ],
+                  color='red',
+                  marker='o',
+                  ms=6,
+                  ls='none',
+                 zorder=999999 )
+
+        plt.plot( xs,
+                  np.vectorize(autogen_b10film_ion_escape_probability)(xs),
+                  label='autogenfct',color='orange',lw=3,ls='--',zorder=999995)
+
+
+#    plt.plot([0.0,1.1,2.7,3.5],
+#              [y[0],0.31,0.047,0.0],
+#             label='piecewiselin',color='orange',lw=4,ls=':',zorder=9999)
+#
+#    plt.plot([0.0,1.1,2.7,3.5],
+#              [y[0],0.31,0.047,0.0],
+#             label='piecewiselin',color='orange',lw=4,ls=':',zorder=9999)
+#
+
+
+    #plt.plot(x,[0.5,]*len(x),label='fit2',color='orange',lw=4,zorder=999)
+
+    plt.legend()
+    plt.grid()
+    plt.xlabel('absorption distance from counting gas (micron)')
+    plt.ylabel('Probability of >120keV deposited in gas')
+    plt.show()
+
+
+    pass
+
+def main():
+    args = sys.argv[1:]
+    infile = [e for e in args if e.endswith('.json')]
+    if len(infile)!=1:
+        raise SystemExit( "please supply a single json file produced with"
+                          " ./bin/rung4sim as argument (find some in the"
+                          " data/ folder)" )
+    infile = infile[0]
+
+    data = json.loads(pathlib.Path(infile).read_text())
+    if not 'nodump' in args:
+        import pprint
+        pprint.pprint(data)
+    if not 'nohists' in args:
+        show_hists(data)
+    if not 'nofit' in args:
+        do_fit( data,
+                data_only = ('fitinputonly' in args ) )
+    if not 'noprintfct' in args:
+        print_fct()
+
+    if not 'noprintcfg' in args:
+        import pprint
+        print()
+        pprint.pprint(data['cfg'])
+
+if __name__=='__main__':
+    main()
+
