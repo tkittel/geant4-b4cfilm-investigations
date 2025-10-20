@@ -34,5 +34,6 @@ double b10film_ion_escape_probability( double x )
       return 0.1237493 - 0.03540299 * x;
     return 0.01488675 - 0.003710843 * x;
   }
-  return ( x > 4.2199578 ? 0.0 : ( 0.006843243 - 0.001621622 * x ) );
+  const double p = 0.006843243 - 0.001621622 * x;
+  return p > 0.0 ? p : 0.0;
 }
