@@ -19,16 +19,14 @@ def b10film_ion_escape_probability( x ):
         return 0.7873778 - 0.4188889 * x
       return 0.6159 - 0.263 * x
     return 0.4934833 - 0.1688333 * x
-  if x > 4.2199578:
-    return 0.0
-  if x < 2.7:
-    return 0.40265 - 0.1325 * x
-  if x < 2.9:
-    return 0.30005 - 0.0945 * x
   if x < 3.1:
+    if x < 2.7:
+      return 0.40265 - 0.1325 * x
+    if x < 2.9:
+      return 0.30005 - 0.0945 * x
     return 0.2 - 0.06 * x
-  if x < 3.435:
-    return 0.1237493 - 0.03540299 * x
   if x < 3.85:
+    if x < 3.435:
+      return 0.1237493 - 0.03540299 * x
     return 0.01488675 - 0.003710843 * x
-  return 0.006843243 - 0.001621622 * x
+  return 0.0 if x > 4.2199578 else ( 0.006843243 - 0.001621622 * x )
