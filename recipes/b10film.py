@@ -1,15 +1,15 @@
 def b10film_ion_escape_probability( x ):
-  # X is the distance between the point where the neutron is absorbed in a B4C
-  # thin film, and the counting gas volume. Returns the probability of secondary
-  # ions reaching the counting gas and depositing at least 120keV of energy.
+  # X is the distance in micrometers between the point where the neutron is
+  # absorbed in a B4C thin film, and the counting gas volume. Returns the
+  # probability of secondary ions reaching the counting gas and depositing at
+  # least 120keV of energy.
   #
   # Parameterised based on Geant4 simulations by T. Kittelmann, October 2025.
   #
   # Details (results are not believed to be overly sensitive to these):
   #
-  #   Geant4 11.3.2, NCrystal materials, QGSP_BIC_HP_EMZ list, Monochromatic
-  #   neutrons hitting spherical geometry. B4C enrichment level 95%. 70-30
-  #   Ar-CO2 counting gas.
+  #   Geant4 11.3.2, NCrystal materials, QGSP_BIC_HP_EMZ list, 70-30 Ar-CO2
+  #   1atm counting gas. B10 enrichment levels tested: 80% and 95%.
   #
   if x < 1.01:
     return 0.984 - 0.6135644 * x
